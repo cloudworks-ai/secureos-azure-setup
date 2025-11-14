@@ -75,7 +75,7 @@ Updated all documentation to reflect EKS-based approach:
 ### Security
 ✅ Maintained secretless authentication
 ✅ Maintained least-privilege access
-✅ No changes to role assignments (still read-only)
+✅ Three read-only roles assigned: Reader, Security Reader, Log Analytics Reader
 
 ### User Experience
 ✅ Better structured output with clear sections

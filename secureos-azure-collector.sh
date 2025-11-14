@@ -46,7 +46,7 @@ Description:
   
   The script will:
   - Create an Azure AD App Registration and Service Principal named: ${APP_REG_NAME}
-  - Assign read-only roles (Reader, Security Reader, Policy Insights Data Reader, Log Analytics Reader)
+  - Assign read-only roles (Reader, Security Reader, Log Analytics Reader)
   - Configure Federated Identity to allow SecureOS's AWS infrastructure to access your Azure
   - Works with EKS, EC2, Lambda, ECS - any AWS service SecureOS uses
   - No secrets or keys are created (uses workload identity federation)
@@ -134,7 +134,7 @@ fi
 echo ">> Assigning read-only roles to Service Principal..."
 SUBSCRIPTION_SCOPE="/subscriptions/${SUBSCRIPTION_ID}"
 
-for ROLE in "Reader" "Security Reader" "Policy Insights Data Reader" "Log Analytics Reader"; do
+for ROLE in "Reader" "Security Reader" "Log Analytics Reader"; do
   echo "   - Assigning role: ${ROLE}..."
   az role assignment create \
     --assignee "${SP_OBJECT_ID}" \
@@ -232,7 +232,6 @@ echo ""
 echo "Roles Assigned:"
 echo "  - Reader"
 echo "  - Security Reader"
-echo "  - Policy Insights Data Reader"
 echo "  - Log Analytics Reader"
 echo ""
 echo "SecureOS can now access your Azure subscription via Workload"

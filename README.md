@@ -76,7 +76,6 @@ The script assigns the following built-in Azure roles at the subscription scope:
 |------|---------|
 | **Reader** | Read-only access to all resources (compute, storage, networking, etc.) |
 | **Security Reader** | Read access to security posture and recommendations in Microsoft Defender for Cloud |
-| **Policy Insights Data Reader** | Read access to policy compliance data and events |
 | **Log Analytics Reader** | Read access to activity logs and monitoring data |
 
 These roles provide comprehensive read-only access for compliance evidence collection without granting:
@@ -229,7 +228,6 @@ SUBSCRIPTION_ID="<YOUR_SUBSCRIPTION_ID>"
 # Remove each role assignment
 az role assignment delete --assignee $SP_ID --role "Reader" --scope /subscriptions/$SUBSCRIPTION_ID
 az role assignment delete --assignee $SP_ID --role "Security Reader" --scope /subscriptions/$SUBSCRIPTION_ID
-az role assignment delete --assignee $SP_ID --role "Policy Insights Data Reader" --scope /subscriptions/$SUBSCRIPTION_ID
 az role assignment delete --assignee $SP_ID --role "Log Analytics Reader" --scope /subscriptions/$SUBSCRIPTION_ID
 ```
 
