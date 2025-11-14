@@ -1,6 +1,6 @@
 # SecureOS Azure Evidence Collector Setup
 
-This repository contains a setup script that grants SecureOS read-only access to your Azure subscription for compliance evidence collection. The script uses **Workload Identity Federation** to allow SecureOS's EKS (Kubernetes) workloads to securely access your Azure resources without requiring secrets or keys.
+This repository contains a setup script that grants SecureOS read-only access to your Azure subscription for compliance evidence collection. The script uses **Client Secret Authentication** for secure access to your Azure resources.
 
 ## Overview
 
@@ -8,8 +8,8 @@ The `secureos-azure-collector.sh` script automates the configuration of:
 
 1. **Azure AD App Registration** - Creates an application identity for SecureOS
 2. **Service Principal** - Creates the service principal for role assignments
-3. **Read-only Roles** - Assigns least-privilege built-in roles for compliance data collection
-4. **Federated Identity Credential** - Configures EKS-to-Azure federation (no secrets required)
+3. **Client Secret** - Generates a secure client secret for authentication (valid for 2 years)
+4. **Read-only Roles** - Assigns least-privilege built-in roles for compliance data collection
 
 ## Prerequisites
 
@@ -23,9 +23,8 @@ The user running this script must have:
 - Permission to create Azure AD App Registrations
 - Permission to assign roles at the subscription level (Owner or User Access Administrator)
 
-### ✅ NO AWS Access Required
-This script **only requires Azure credentials**. You do NOT need AWS access or credentials.
-The script configures your Azure subscription to trust SecureOS's EKS infrastructure.
+### ✅ Simple Setup
+This script only requires Azure credentials. No complex federation setup needed - just run the script and securely provide the generated credentials to SecureOS.
 
 ## Quick Start
 
@@ -62,11 +61,16 @@ curl -sL https://raw.githubusercontent.com/cloudworks-ai/secureos-azure-setup/ma
 
 1. **App Registration**: `SecureOS-Collector`
    - An application identity in Azure AD
-   - No secrets or certificates are created
+   - Includes a generated client secret
 
 2. **Service Principal**
    - The service principal associated with the app registration
    - Used for role-based access control (RBAC)
+
+3. **Client Secret**
+   - Secure credential for authentication
+   - Valid for 2 years (can be rotated anytime)
+   - Displayed once at the end of the script
 
 ### Assigns Read-Only Roles
 
@@ -83,17 +87,14 @@ These roles provide comprehensive read-only access for compliance evidence colle
 - Access to secrets or keys
 - Access to data inside storage accounts or databases
 
-### Configures Federated Identity
+### Generates Authentication Credentials
 
-Creates a federated identity credential that allows **SecureOS's** EKS workloads to obtain Azure access tokens:
+Creates a client secret for SecureOS to authenticate to Azure:
 
-- **EKS Cluster**: cloudworks-eks-cluster-prod (NOT your infrastructure)
-- **Namespace**: compliance
-- **ServiceAccount**: eso-compliance
-- **Subject**: `system:serviceaccount:compliance:eso-compliance`
-- **Authentication Method**: EKS OIDC → Azure AD (no secrets)
-
-**Note**: This configures trust for SecureOS's infrastructure to access your Azure resources. You don't need any AWS or EKS resources yourself.
+- **Authentication Method**: Client ID + Client Secret
+- **Secret Validity**: 2 years
+- **Security**: Secret is only displayed once during setup
+- **Rotation**: Can be rotated anytime via Azure Portal or by re-running the script
 
 ## Usage
 
@@ -141,11 +142,11 @@ az account show --query id -o tsv
 
 ## Verification
 
-After running the script, you'll see a success message with the following values to provide to SecureOS:
-- Tenant ID
-- Subscription ID
-- Client ID (Application ID)
-- Federated Credential Name
+After running the script, you'll see a success message with the following credentials to provide to SecureOS:
+- **AZURE_TENANT_ID** - Your Azure AD tenant ID
+- **AZURE_SUBSCRIPTION_ID** - Your subscription ID  
+- **AZURE_CLIENT_ID** - The application (client) ID
+- **AZURE_CLIENT_SECRET** - The generated secret (shown once only)
 
 To verify the setup manually:
 
@@ -159,9 +160,9 @@ az ad app list --display-name "SecureOS-Collector" --output table
 az role assignment list --all --assignee <SERVICE_PRINCIPAL_ID> --output table
 ```
 
-### Check Federated Credentials
+### Check Client Secrets
 ```bash
-az ad app federated-credential list --id <APP_ID> --output table
+az ad app credential list --id <APP_ID> --output table
 ```
 
 ## Security Considerations
@@ -174,9 +175,10 @@ az ad app federated-credential list --id <APP_ID> --output table
   - Azure AD user data or passwords
 
 ### How is Authentication Secured?
-- **No secrets or keys** - Uses workload identity federation (OIDC-based trust)
-- SecureOS's EKS ServiceAccount must present valid JWT tokens to obtain Azure tokens
-- Azure validates the EKS identity before granting access
+- **Client secret authentication** - Industry-standard OAuth 2.0 client credentials flow
+- Secret is only displayed once during setup
+- Secret can be rotated anytime without downtime
+- Access is scoped to specific subscription with least-privilege roles
 
 ### Compliance
 - All access is logged in Azure Activity Logs

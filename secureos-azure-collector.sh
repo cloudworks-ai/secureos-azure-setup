@@ -1,29 +1,17 @@
 #!/usr/bin/env bash
-# SecureOS – Azure Evidence Setup (Federated Identity / EKS → Azure, config-only)
+# SecureOS – Azure Evidence Setup (Client Secret Authentication)
 # - Creates App Registration and Service Principal in Azure AD
 # - Grants least-privilege read-only roles (Reader, Security Reader, etc.)
-# - Configures Federated Identity Credential to allow EKS ServiceAccount to authenticate
+# - Generates a client secret for authentication
 # - Optional: verify and display setup details
 
 set -euo pipefail
 
-# ========= Hardcoded Constants (provided by SecureOS) =========
-# SecureOS AWS Account and IAM Role
-# NOTE: This is SecureOS's AWS infrastructure - customers do NOT need AWS access
-AWS_ACCOUNT_ID="294393683475"
-AWS_ROLE_NAME="SecureOSAzureCollectorRole"
-
-# Federated identity configuration
-# Using AWS STS as issuer allows ANY AWS service to access Azure (not just EKS)
-FEDERATED_ISSUER="https://sts.amazonaws.com"
-FEDERATED_SUBJECT="arn:aws:sts::${AWS_ACCOUNT_ID}:assumed-role/${AWS_ROLE_NAME}/*"
-
-# Token audience for federation (Azure standard)
-AUDIENCE="api://AzureADTokenExchange"
-
+# ========= Hardcoded Constants =========
 # Azure App Registration name
 APP_REG_NAME="SecureOS-Collector"
-FEDERATION_CREDENTIAL_NAME="SecureOSFederatedAccess"
+# Client secret validity (in years)
+SECRET_VALIDITY_YEARS=2
 
 # ========= Defaults =========
 DO_VERIFY="${DO_VERIFY:-0}"  # 1 => display detailed setup info after completion
@@ -40,16 +28,13 @@ Optional:
 
 Description:
   This script configures read-only access for SecureOS compliance evidence collection
-  from your Azure subscription using Workload Identity Federation.
-
-  This script ONLY requires Azure access - NO AWS credentials needed.
+  from your Azure subscription using client secret authentication.
   
   The script will:
   - Create an Azure AD App Registration and Service Principal named: ${APP_REG_NAME}
+  - Generate a client secret (valid for ${SECRET_VALIDITY_YEARS} years)
   - Assign read-only roles (Reader, Security Reader, Log Analytics Reader)
-  - Configure Federated Identity to allow SecureOS's AWS infrastructure to access your Azure
-  - Works with EKS, EC2, Lambda, ECS - any AWS service SecureOS uses
-  - No secrets or keys are created (uses workload identity federation)
+  - Display the credentials needed for SecureOS to access your Azure subscription
 
 Environment overrides:
   DO_VERIFY=1  (same as --verify flag)
@@ -76,12 +61,11 @@ echo "=========================================="
 echo "SecureOS Azure Onboarding"
 echo "=========================================="
 echo ""
-echo "This script will configure Azure to allow SecureOS's"
-echo "AWS infrastructure to access your Azure subscription."
+echo "This script will configure Azure to allow SecureOS"
+echo "to access your Azure subscription."
 echo ""
 echo ">> Target Subscription: ${SUBSCRIPTION_ID}"
 echo ">> App Registration: ${APP_REG_NAME}"
-echo ">> SecureOS AWS Role: ${AWS_ROLE_NAME}"
 echo ""
 
 # ========= Prechecks =========
@@ -145,39 +129,24 @@ done
 
 echo ">> Role assignments completed."
 
-# ========= Configure Federated Identity Credential (idempotent) =========
-echo ">> Configuring Federated Identity Credential for SecureOS AWS infrastructure..."
+# ========= Create Client Secret =========
+echo ">> Creating client secret..."
 
-# Check if federated credential already exists
-EXISTING_FED_CRED="$(az ad app federated-credential list --id "${APP_ID}" --query "[?name=='${FEDERATION_CREDENTIAL_NAME}'].name" -o tsv 2>/dev/null || true)"
+# Generate a client secret valid for specified years
+SECRET_END_DATE=$(date -u -v+${SECRET_VALIDITY_YEARS}y +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -d "+${SECRET_VALIDITY_YEARS} years" +"%Y-%m-%dT%H:%M:%SZ")
 
-if [[ -z "${EXISTING_FED_CRED}" ]]; then
-  echo ">> Creating Federated Identity Credential: ${FEDERATION_CREDENTIAL_NAME}..."
-  
-  # Create temporary JSON file for federated credential
-  FED_CRED_FILE="/tmp/secureos-fed-cred-$$.json"
-  cat > "${FED_CRED_FILE}" <<EOF
-{
-  "name": "${FEDERATION_CREDENTIAL_NAME}",
-  "issuer": "${FEDERATED_ISSUER}",
-  "subject": "${FEDERATED_SUBJECT}",
-  "description": "Federated identity for SecureOS AWS infrastructure to access Azure",
-  "audiences": [
-    "${AUDIENCE}"
-  ]
-}
-EOF
+SECRET_OUTPUT=$(az ad app credential reset \
+  --id "${APP_ID}" \
+  --append \
+  --display-name "SecureOS-Access-Secret" \
+  --end-date "${SECRET_END_DATE}" \
+  --query '{secret:password, secretId:keyId}' \
+  -o json)
 
-  az ad app federated-credential create \
-    --id "${APP_ID}" \
-    --parameters "${FED_CRED_FILE}" \
-    --output none
-  
-  rm -f "${FED_CRED_FILE}"
-  echo ">> Federated Identity Credential created successfully."
-else
-  echo ">> Federated Identity Credential already exists: ${FEDERATION_CREDENTIAL_NAME}"
-fi
+CLIENT_SECRET=$(echo "${SECRET_OUTPUT}" | jq -r '.secret')
+SECRET_ID=$(echo "${SECRET_OUTPUT}" | jq -r '.secretId')
+
+echo ">> Client secret created successfully (valid for ${SECRET_VALIDITY_YEARS} years)"
 
 # ========= Verification (optional) =========
 if [[ "${DO_VERIFY}" -eq 1 ]]; then
@@ -196,8 +165,8 @@ if [[ "${DO_VERIFY}" -eq 1 ]]; then
   az role assignment list --assignee "${SP_OBJECT_ID}" --scope "${SUBSCRIPTION_SCOPE}" \
     --query '[].{Role:roleDefinitionName, Scope:scope}' -o table
   echo ""
-  echo "Federated Identity Credentials:"
-  az ad app federated-credential list --id "${APP_ID}" -o table
+  echo "Client Secrets:"
+  az ad app credential list --id "${APP_ID}" --query '[].{DisplayName:displayName, KeyId:keyId, EndDate:endDateTime}' -o table
 fi
 
 # ========= Success output =========
@@ -208,12 +177,12 @@ echo "=========================================="
 echo ""
 echo "Azure onboarding completed successfully!"
 echo ""
-echo "Please provide these values to SecureOS:"
+echo "⚠️  IMPORTANT: Please provide these credentials to SecureOS securely:"
 echo ""
-echo "TENANT_ID=${TENANT_ID}"
-echo "SUBSCRIPTION_ID=${SUBSCRIPTION_ID}"
-echo "CLIENT_ID=${APP_ID}"
-echo "FEDERATED_CREDENTIAL_NAME=${FEDERATION_CREDENTIAL_NAME}"
+echo "AZURE_TENANT_ID=${TENANT_ID}"
+echo "AZURE_SUBSCRIPTION_ID=${SUBSCRIPTION_ID}"
+echo "AZURE_CLIENT_ID=${APP_ID}"
+echo "AZURE_CLIENT_SECRET=${CLIENT_SECRET}"
 echo ""
 echo "=========================================="
 echo ""
@@ -221,20 +190,16 @@ echo "Configuration Summary:"
 echo "  Subscription Name:    ${SUBSCRIPTION_NAME}"
 echo "  App Registration:     ${APP_REG_NAME}"
 echo "  Service Principal ID: ${SP_OBJECT_ID}"
-echo ""
-echo "Federated Identity:"
-echo "  AWS Account:          ${AWS_ACCOUNT_ID}"
-echo "  AWS Role:             ${AWS_ROLE_NAME}"
-echo "  Issuer:               ${FEDERATED_ISSUER}"
-echo "  Subject:              ${FEDERATED_SUBJECT}"
-echo "  Audience:             ${AUDIENCE}"
+echo "  Secret Valid Until:   ${SECRET_END_DATE}"
 echo ""
 echo "Roles Assigned:"
 echo "  - Reader"
 echo "  - Security Reader"
 echo "  - Log Analytics Reader"
 echo ""
-echo "SecureOS can now access your Azure subscription via Workload"
-echo "Identity Federation (no secrets required)."
+echo "⚠️  SECURITY NOTES:"
+echo "  - Store the CLIENT_SECRET securely (it won't be displayed again)"
+echo "  - The secret is valid for ${SECRET_VALIDITY_YEARS} years"
+echo "  - You can rotate the secret anytime via Azure Portal"
 echo ""
 
