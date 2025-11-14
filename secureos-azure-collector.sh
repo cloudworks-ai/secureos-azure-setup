@@ -1,43 +1,61 @@
 #!/usr/bin/env bash
-# SecureOS – Azure Evidence Setup (Federated Identity / AWS → Azure, config-only)
+# SecureOS – Azure Evidence Setup (Federated Identity / EKS → Azure, config-only)
 # - Creates App Registration and Service Principal in Azure AD
 # - Grants least-privilege read-only roles (Reader, Security Reader, etc.)
-# - Configures Federated Identity Credential to allow AWS role to impersonate the identity
+# - Configures Federated Identity Credential to allow EKS ServiceAccount to authenticate
 # - Optional: verify and display setup details
 
 set -euo pipefail
 
 # ========= Hardcoded Constants (provided by SecureOS) =========
+# SecureOS AWS Account and IAM Role
+# NOTE: This is SecureOS's AWS infrastructure - customers do NOT need AWS access
 AWS_ACCOUNT_ID="294393683475"
 AWS_ROLE_NAME="SecureOSAzureCollectorRole"
-APP_REG_NAME="SecureOS-Evidence-Collector"
-FEDERATION_CREDENTIAL_NAME="secureos-federation"
+
+# Federated identity configuration
+# Using AWS STS as issuer allows ANY AWS service to access Azure (not just EKS)
+FEDERATED_ISSUER="https://sts.amazonaws.com"
+FEDERATED_SUBJECT="arn:aws:sts::${AWS_ACCOUNT_ID}:assumed-role/${AWS_ROLE_NAME}/*"
+
+# Token audience for federation (Azure standard)
+AUDIENCE="api://AzureADTokenExchange"
+
+# Azure App Registration name
+APP_REG_NAME="SecureOS-Collector"
+FEDERATION_CREDENTIAL_NAME="SecureOSFederatedAccess"
 
 # ========= Defaults =========
 DO_VERIFY="${DO_VERIFY:-0}"  # 1 => display detailed setup info after completion
 
 usage() {
   cat <<USG >&2
-Usage: $0 --subscription <SUBSCRIPTION_ID> [--verify]
+Usage: $0 --subscription-id <SUBSCRIPTION_ID> [--verify]
 
 Required:
-  --subscription <SUBSCRIPTION_ID>    Azure subscription ID to grant access to
+  --subscription-id <SUBSCRIPTION_ID>    Azure subscription ID to grant access to
 
 Optional:
-  --verify                            Display detailed setup information after completion
+  --verify                               Display detailed setup information after completion
 
 Description:
   This script configures read-only access for SecureOS compliance evidence collection
-  from your AWS infrastructure to your Azure subscription using Federated Identity.
+  from your Azure subscription using Workload Identity Federation.
 
+  This script ONLY requires Azure access - NO AWS credentials needed.
+  
   The script will:
-  - Create an Azure AD App Registration and Service Principal
+  - Create an Azure AD App Registration and Service Principal named: ${APP_REG_NAME}
   - Assign read-only roles (Reader, Security Reader, Policy Insights Data Reader, Log Analytics Reader)
-  - Configure Federated Identity to allow AWS role: ${AWS_ROLE_NAME}
+  - Configure Federated Identity to allow SecureOS's AWS infrastructure to access your Azure
+  - Works with EKS, EC2, Lambda, ECS - any AWS service SecureOS uses
   - No secrets or keys are created (uses workload identity federation)
 
 Environment overrides:
   DO_VERIFY=1  (same as --verify flag)
+
+Example:
+  curl -sL https://secureos.sh/azure/setup.sh | bash -s -- --subscription-id <SUB_ID>
 USG
   exit 1
 }
@@ -46,7 +64,7 @@ USG
 SUBSCRIPTION_ID=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --subscription) SUBSCRIPTION_ID="$2"; shift 2;;
+    --subscription|--subscription-id) SUBSCRIPTION_ID="$2"; shift 2;;
     --verify) DO_VERIFY=1; shift;;
     *) usage;;
   esac
@@ -54,13 +72,17 @@ done
 
 [[ -z "${SUBSCRIPTION_ID}" ]] && usage
 
-# ========= Derived values =========
-AWS_ROLE_ARN="arn:aws:sts::${AWS_ACCOUNT_ID}:assumed-role/${AWS_ROLE_NAME}"
-FEDERATED_SUBJECT="${AWS_ROLE_ARN}/*"
-
-echo ">> Subscription ID: ${SUBSCRIPTION_ID}"
+echo "=========================================="
+echo "SecureOS Azure Onboarding"
+echo "=========================================="
+echo ""
+echo "This script will configure Azure to allow SecureOS's"
+echo "AWS infrastructure to access your Azure subscription."
+echo ""
+echo ">> Target Subscription: ${SUBSCRIPTION_ID}"
 echo ">> App Registration: ${APP_REG_NAME}"
-echo ">> AWS Role ARN: ${AWS_ROLE_ARN}"
+echo ">> SecureOS AWS Role: ${AWS_ROLE_NAME}"
+echo ""
 
 # ========= Prechecks =========
 command -v az >/dev/null || { echo "ERROR: Azure CLI (az) not found. Please install it or use Azure Cloud Shell."; exit 1; }
@@ -124,7 +146,7 @@ done
 echo ">> Role assignments completed."
 
 # ========= Configure Federated Identity Credential (idempotent) =========
-echo ">> Configuring Federated Identity Credential for AWS role..."
+echo ">> Configuring Federated Identity Credential for SecureOS AWS infrastructure..."
 
 # Check if federated credential already exists
 EXISTING_FED_CRED="$(az ad app federated-credential list --id "${APP_ID}" --query "[?name=='${FEDERATION_CREDENTIAL_NAME}'].name" -o tsv 2>/dev/null || true)"
@@ -137,11 +159,11 @@ if [[ -z "${EXISTING_FED_CRED}" ]]; then
   cat > "${FED_CRED_FILE}" <<EOF
 {
   "name": "${FEDERATION_CREDENTIAL_NAME}",
-  "issuer": "https://sts.amazonaws.com",
+  "issuer": "${FEDERATED_ISSUER}",
   "subject": "${FEDERATED_SUBJECT}",
-  "description": "Federated identity for SecureOS AWS role to access Azure",
+  "description": "Federated identity for SecureOS AWS infrastructure to access Azure",
   "audiences": [
-    "api://AzureADTokenExchange"
+    "${AUDIENCE}"
   ]
 }
 EOF
@@ -184,19 +206,28 @@ echo "=========================================="
 echo "SUCCESS ✅"
 echo "=========================================="
 echo ""
-echo "Configuration completed successfully!"
+echo "Azure onboarding completed successfully!"
 echo ""
-echo "Details:"
-echo "  Subscription ID:      ${SUBSCRIPTION_ID}"
+echo "Please provide these values to SecureOS:"
+echo ""
+echo "TENANT_ID=${TENANT_ID}"
+echo "SUBSCRIPTION_ID=${SUBSCRIPTION_ID}"
+echo "CLIENT_ID=${APP_ID}"
+echo "FEDERATED_CREDENTIAL_NAME=${FEDERATION_CREDENTIAL_NAME}"
+echo ""
+echo "=========================================="
+echo ""
+echo "Configuration Summary:"
 echo "  Subscription Name:    ${SUBSCRIPTION_NAME}"
-echo "  Tenant ID:            ${TENANT_ID}"
-echo "  Application (Client) ID: ${APP_ID}"
+echo "  App Registration:     ${APP_REG_NAME}"
 echo "  Service Principal ID: ${SP_OBJECT_ID}"
 echo ""
 echo "Federated Identity:"
 echo "  AWS Account:          ${AWS_ACCOUNT_ID}"
 echo "  AWS Role:             ${AWS_ROLE_NAME}"
+echo "  Issuer:               ${FEDERATED_ISSUER}"
 echo "  Subject:              ${FEDERATED_SUBJECT}"
+echo "  Audience:             ${AUDIENCE}"
 echo ""
 echo "Roles Assigned:"
 echo "  - Reader"
@@ -204,9 +235,7 @@ echo "  - Security Reader"
 echo "  - Policy Insights Data Reader"
 echo "  - Log Analytics Reader"
 echo ""
-echo "Your AWS role (${AWS_ROLE_NAME}) can now access this Azure"
-echo "subscription via Federated Identity Federation (no secrets required)."
-echo ""
-echo "Works from: EKS, EC2, Lambda, or any AWS service with IAM credentials"
+echo "SecureOS can now access your Azure subscription via Workload"
+echo "Identity Federation (no secrets required)."
 echo ""
 
