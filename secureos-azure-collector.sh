@@ -207,4 +207,6 @@ echo ""
 echo "Your AWS role (${AWS_ROLE_NAME}) can now access this Azure"
 echo "subscription via Federated Identity Federation (no secrets required)."
 echo ""
+echo "Works from: EKS, EC2, Lambda, or any AWS service with IAM credentials"
+echo ""
 
