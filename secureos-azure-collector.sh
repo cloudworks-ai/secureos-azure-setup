@@ -41,7 +41,7 @@ Environment overrides:
   DO_VERIFY=1  (same as --verify flag)
 
 Example:
-  curl -sL https://secureos.sh/azure/setup.sh | bash -s -- --subscription-id <SUB_ID>
+  curl -sL https://raw.githubusercontent.com/cloudworks-ai/secureos-azure-setup/main/secureos-azure-collector.sh | bash -s -- --subscription-id <SUB_ID>
 USG
   exit 1
 }

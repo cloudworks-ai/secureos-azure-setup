@@ -36,6 +36,11 @@ Open [Azure Cloud Shell](https://shell.azure.com) and run:
 curl -sL https://raw.githubusercontent.com/cloudworks-ai/secureos-azure-setup/main/secureos-azure-collector.sh | bash -s -- --subscription-id <YOUR_SUBSCRIPTION_ID>
 ```
 
+Or use the shorter command:
+```bash
+bash <(curl -sL https://raw.githubusercontent.com/cloudworks-ai/secureos-azure-setup/main/secureos-azure-collector.sh) --subscription-id <YOUR_SUBSCRIPTION_ID>
+```
+
 ### Option 2: Local Azure CLI
 
 If you have Azure CLI installed locally:
@@ -49,7 +54,7 @@ chmod +x secureos-azure-collector.sh
 
 ### With Verification
 
-To see detailed setup information after completion:
+To see detailed setup information after completion, add the `--verify` flag:
 
 ```bash
 curl -sL https://raw.githubusercontent.com/cloudworks-ai/secureos-azure-setup/main/secureos-azure-collector.sh | bash -s -- --subscription-id <YOUR_SUBSCRIPTION_ID> --verify
