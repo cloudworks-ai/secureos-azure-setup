@@ -130,54 +130,77 @@ done
 
 echo ">> Role assignments completed."
 
-# ========= Assign Microsoft Graph API Permissions =========
-echo ">> Assigning Microsoft Graph API permissions for Azure AD access..."
+# ========= Assign Microsoft Graph API Permissions (idempotent) =========
+echo ">> Configuring Microsoft Graph API permissions for Azure AD access..."
 
-# Microsoft Graph Application ID (constant)
+# Microsoft Graph Application ID (constant across all Azure AD tenants)
 MSGRAPH_APP_ID="00000003-0000-0000-c000-000000000000"
-
-# Get the Microsoft Graph Service Principal
-MSGRAPH_SP_ID=$(az ad sp show --id ${MSGRAPH_APP_ID} --query "id" -o tsv)
 
 # Permission IDs for Microsoft Graph (these are constant GUIDs)
 USER_READ_ALL_ID="df021288-bdef-4463-88db-98f22de89214"      # User.Read.All
 DIRECTORY_READ_ALL_ID="7ab1d382-f21e-4acd-a863-ba3e13f7da61" # Directory.Read.All
 
-echo "   - Adding User.Read.All (Application permission)..."
-az ad app permission add \
-  --id "${APP_ID}" \
-  --api ${MSGRAPH_APP_ID} \
-  --api-permissions ${USER_READ_ALL_ID}=Role 2>/dev/null || true
+# Check existing permissions
+EXISTING_PERMS=$(az ad app permission list --id "${APP_ID}" --query "[?resourceAppId=='${MSGRAPH_APP_ID}'].resourceAccess[].id" -o tsv 2>/dev/null || true)
 
-echo "   - Adding Directory.Read.All (Application permission)..."
-az ad app permission add \
-  --id "${APP_ID}" \
-  --api ${MSGRAPH_APP_ID} \
-  --api-permissions ${DIRECTORY_READ_ALL_ID}=Role 2>/dev/null || true
+# Add User.Read.All if not present
+if echo "${EXISTING_PERMS}" | grep -q "${USER_READ_ALL_ID}"; then
+  echo "   - User.Read.All already assigned"
+else
+  echo "   - Adding User.Read.All (Application permission)..."
+  az ad app permission add \
+    --id "${APP_ID}" \
+    --api ${MSGRAPH_APP_ID} \
+    --api-permissions ${USER_READ_ALL_ID}=Role 2>/dev/null || true
+fi
+
+# Add Directory.Read.All if not present
+if echo "${EXISTING_PERMS}" | grep -q "${DIRECTORY_READ_ALL_ID}"; then
+  echo "   - Directory.Read.All already assigned"
+else
+  echo "   - Adding Directory.Read.All (Application permission)..."
+  az ad app permission add \
+    --id "${APP_ID}" \
+    --api ${MSGRAPH_APP_ID} \
+    --api-permissions ${DIRECTORY_READ_ALL_ID}=Role 2>/dev/null || true
+fi
 
 echo "   - Granting admin consent for API permissions..."
 az ad app permission admin-consent --id "${APP_ID}" 2>/dev/null || echo "   ⚠️  Admin consent may require additional permissions"
 
 echo ">> Microsoft Graph API permissions configured."
 
-# ========= Create Client Secret =========
-echo ">> Creating client secret..."
+# ========= Create Client Secret (idempotent) =========
+echo ">> Checking for existing client secrets..."
 
-# Generate a client secret valid for specified years
-SECRET_END_DATE=$(date -u -v+${SECRET_VALIDITY_YEARS}y +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -d "+${SECRET_VALIDITY_YEARS} years" +"%Y-%m-%dT%H:%M:%SZ")
+# Check if a secret already exists
+EXISTING_SECRETS=$(az ad app credential list --id "${APP_ID}" --query '[].displayName' -o tsv 2>/dev/null || true)
 
-SECRET_OUTPUT=$(az ad app credential reset \
-  --id "${APP_ID}" \
-  --append \
-  --display-name "SecureOS-Access-Secret" \
-  --end-date "${SECRET_END_DATE}" \
-  --query '{secret:password, secretId:keyId}' \
-  -o json)
-
-CLIENT_SECRET=$(echo "${SECRET_OUTPUT}" | jq -r '.secret')
-SECRET_ID=$(echo "${SECRET_OUTPUT}" | jq -r '.secretId')
-
-echo ">> Client secret created successfully (valid for ${SECRET_VALIDITY_YEARS} years)"
+if echo "${EXISTING_SECRETS}" | grep -q "SecureOS-Access-Secret"; then
+  echo ">> Client secret already exists - skipping creation"
+  echo "   ⚠️  Note: The existing secret value cannot be retrieved"
+  echo "   If you need a new secret, manually delete the old one first or rotate via Azure Portal"
+  CLIENT_SECRET="<EXISTING_SECRET_NOT_RETRIEVABLE>"
+  SECRET_END_DATE="<SEE_AZURE_PORTAL>"
+else
+  echo ">> Creating new client secret..."
+  
+  # Generate a client secret valid for specified years
+  SECRET_END_DATE=$(date -u -v+${SECRET_VALIDITY_YEARS}y +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -d "+${SECRET_VALIDITY_YEARS} years" +"%Y-%m-%dT%H:%M:%SZ")
+  
+  SECRET_OUTPUT=$(az ad app credential reset \
+    --id "${APP_ID}" \
+    --append \
+    --display-name "SecureOS-Access-Secret" \
+    --end-date "${SECRET_END_DATE}" \
+    --query '{secret:password, secretId:keyId}' \
+    -o json)
+  
+  CLIENT_SECRET=$(echo "${SECRET_OUTPUT}" | jq -r '.secret')
+  SECRET_ID=$(echo "${SECRET_OUTPUT}" | jq -r '.secretId')
+  
+  echo ">> Client secret created successfully (valid for ${SECRET_VALIDITY_YEARS} years)"
+fi
 
 # ========= Verification (optional) =========
 if [[ "${DO_VERIFY}" -eq 1 ]]; then
@@ -211,13 +234,28 @@ echo "=========================================="
 echo ""
 echo "Azure onboarding completed successfully!"
 echo ""
-echo "⚠️  IMPORTANT: Please provide these credentials to SecureOS securely:"
-echo ""
-echo "AZURE_TENANT_ID=${TENANT_ID}"
-echo "AZURE_SUBSCRIPTION_ID=${SUBSCRIPTION_ID}"
-echo "AZURE_CLIENT_ID=${APP_ID}"
-echo "AZURE_CLIENT_SECRET=${CLIENT_SECRET}"
-echo ""
+
+if [[ "${CLIENT_SECRET}" == "<EXISTING_SECRET_NOT_RETRIEVABLE>" ]]; then
+  echo "⚠️  IMPORTANT: App Registration already exists"
+  echo ""
+  echo "Configuration values (provide to SecureOS):"
+  echo ""
+  echo "AZURE_TENANT_ID=${TENANT_ID}"
+  echo "AZURE_SUBSCRIPTION_ID=${SUBSCRIPTION_ID}"
+  echo "AZURE_CLIENT_ID=${APP_ID}"
+  echo "AZURE_CLIENT_SECRET=<USE_EXISTING_SECRET>"
+  echo ""
+  echo "Note: The existing client secret cannot be retrieved."
+  echo "If you lost it, manually rotate the secret in Azure Portal."
+else
+  echo "⚠️  IMPORTANT: Please provide these credentials to SecureOS securely:"
+  echo ""
+  echo "AZURE_TENANT_ID=${TENANT_ID}"
+  echo "AZURE_SUBSCRIPTION_ID=${SUBSCRIPTION_ID}"
+  echo "AZURE_CLIENT_ID=${APP_ID}"
+  echo "AZURE_CLIENT_SECRET=${CLIENT_SECRET}"
+  echo ""
+fi
 echo "=========================================="
 echo ""
 echo "Configuration Summary:"
