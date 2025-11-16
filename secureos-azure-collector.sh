@@ -34,6 +34,7 @@ Description:
   - Create an Azure AD App Registration and Service Principal named: ${APP_REG_NAME}
   - Generate a client secret (valid for ${SECRET_VALIDITY_YEARS} years)
   - Assign read-only roles (Reader, Security Reader, Log Analytics Reader)
+  - Grant Microsoft Graph API permissions (User.Read.All, Directory.Read.All)
   - Display the credentials needed for SecureOS to access your Azure subscription
 
 Environment overrides:
@@ -129,6 +130,36 @@ done
 
 echo ">> Role assignments completed."
 
+# ========= Assign Microsoft Graph API Permissions =========
+echo ">> Assigning Microsoft Graph API permissions for Azure AD access..."
+
+# Microsoft Graph Application ID (constant)
+MSGRAPH_APP_ID="00000003-0000-0000-c000-000000000000"
+
+# Get the Microsoft Graph Service Principal
+MSGRAPH_SP_ID=$(az ad sp show --id ${MSGRAPH_APP_ID} --query "id" -o tsv)
+
+# Permission IDs for Microsoft Graph (these are constant GUIDs)
+USER_READ_ALL_ID="df021288-bdef-4463-88db-98f22de89214"      # User.Read.All
+DIRECTORY_READ_ALL_ID="7ab1d382-f21e-4acd-a863-ba3e13f7da61" # Directory.Read.All
+
+echo "   - Adding User.Read.All (Application permission)..."
+az ad app permission add \
+  --id "${APP_ID}" \
+  --api ${MSGRAPH_APP_ID} \
+  --api-permissions ${USER_READ_ALL_ID}=Role 2>/dev/null || true
+
+echo "   - Adding Directory.Read.All (Application permission)..."
+az ad app permission add \
+  --id "${APP_ID}" \
+  --api ${MSGRAPH_APP_ID} \
+  --api-permissions ${DIRECTORY_READ_ALL_ID}=Role 2>/dev/null || true
+
+echo "   - Granting admin consent for API permissions..."
+az ad app permission admin-consent --id "${APP_ID}" 2>/dev/null || echo "   ⚠️  Admin consent may require additional permissions"
+
+echo ">> Microsoft Graph API permissions configured."
+
 # ========= Create Client Secret =========
 echo ">> Creating client secret..."
 
@@ -167,6 +198,9 @@ if [[ "${DO_VERIFY}" -eq 1 ]]; then
   echo ""
   echo "Client Secrets:"
   az ad app credential list --id "${APP_ID}" --query '[].{DisplayName:displayName, KeyId:keyId, EndDate:endDateTime}' -o table
+  echo ""
+  echo "API Permissions:"
+  az ad app permission list --id "${APP_ID}" -o table
 fi
 
 # ========= Success output =========
@@ -193,13 +227,18 @@ echo "  Service Principal ID: ${SP_OBJECT_ID}"
 echo "  Secret Valid Until:   ${SECRET_END_DATE}"
 echo ""
 echo "Roles Assigned:"
-echo "  - Reader"
-echo "  - Security Reader"
-echo "  - Log Analytics Reader"
+echo "  - Reader (subscription-level)"
+echo "  - Security Reader (subscription-level)"
+echo "  - Log Analytics Reader (subscription-level)"
+echo ""
+echo "API Permissions:"
+echo "  - User.Read.All (Microsoft Graph)"
+echo "  - Directory.Read.All (Microsoft Graph)"
 echo ""
 echo "⚠️  SECURITY NOTES:"
 echo "  - Store the CLIENT_SECRET securely (it won't be displayed again)"
 echo "  - The secret is valid for ${SECRET_VALIDITY_YEARS} years"
 echo "  - You can rotate the secret anytime via Azure Portal"
+echo "  - API permissions may require admin consent in your tenant"
 echo ""
 
