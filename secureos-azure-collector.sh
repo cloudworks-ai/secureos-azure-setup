@@ -34,7 +34,7 @@ Description:
   - Create an Azure AD App Registration and Service Principal named: ${APP_REG_NAME}
   - Generate a client secret (valid for ${SECRET_VALIDITY_YEARS} years)
   - Assign read-only roles (Reader, Security Reader, Log Analytics Reader)
-  - Grant Microsoft Graph API permissions (User.Read.All, Directory.Read.All)
+  - Grant Microsoft Graph API permissions (User.Read.All, Directory.Read.All, GroupMember.Read.All)
   - Display the credentials needed for SecureOS to access your Azure subscription
 
 Environment overrides:
@@ -137,8 +137,9 @@ echo ">> Configuring Microsoft Graph API permissions for Azure AD access..."
 MSGRAPH_APP_ID="00000003-0000-0000-c000-000000000000"
 
 # Permission IDs for Microsoft Graph (these are constant GUIDs)
-USER_READ_ALL_ID="df021288-bdef-4463-88db-98f22de89214"      # User.Read.All
-DIRECTORY_READ_ALL_ID="7ab1d382-f21e-4acd-a863-ba3e13f7da61" # Directory.Read.All
+USER_READ_ALL_ID="df021288-bdef-4463-88db-98f22de89214"           # User.Read.All
+DIRECTORY_READ_ALL_ID="7ab1d382-f21e-4acd-a863-ba3e13f7da61"      # Directory.Read.All
+GROUPMEMBER_READ_ALL_ID="98830695-27a2-44f7-8c18-0c3ebc9698f6"    # GroupMember.Read.All
 
 # Check existing permissions
 EXISTING_PERMS=$(az ad app permission list --id "${APP_ID}" --query "[?resourceAppId=='${MSGRAPH_APP_ID}'].resourceAccess[].id" -o tsv 2>/dev/null || true)
@@ -163,6 +164,17 @@ else
     --id "${APP_ID}" \
     --api ${MSGRAPH_APP_ID} \
     --api-permissions ${DIRECTORY_READ_ALL_ID}=Role 2>/dev/null || true
+fi
+
+# Add GroupMember.Read.All if not present
+if echo "${EXISTING_PERMS}" | grep -q "${GROUPMEMBER_READ_ALL_ID}"; then
+  echo "   - GroupMember.Read.All already assigned"
+else
+  echo "   - Adding GroupMember.Read.All (Application permission)..."
+  az ad app permission add \
+    --id "${APP_ID}" \
+    --api ${MSGRAPH_APP_ID} \
+    --api-permissions ${GROUPMEMBER_READ_ALL_ID}=Role 2>/dev/null || true
 fi
 
 echo "   - Granting admin consent for API permissions..."
@@ -272,6 +284,7 @@ echo ""
 echo "API Permissions:"
 echo "  - User.Read.All (Microsoft Graph)"
 echo "  - Directory.Read.All (Microsoft Graph)"
+echo "  - GroupMember.Read.All (Microsoft Graph)"
 echo ""
 echo "⚠️  SECURITY NOTES:"
 echo "  - Store the CLIENT_SECRET securely (it won't be displayed again)"

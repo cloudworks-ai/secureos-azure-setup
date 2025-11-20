@@ -10,6 +10,7 @@ The `secureos-azure-collector.sh` script automates the configuration of:
 2. **Service Principal** - Creates the service principal for role assignments
 3. **Client Secret** - Generates a secure client secret for authentication (valid for 2 years)
 4. **Read-only Roles** - Assigns least-privilege built-in roles for compliance data collection
+5. **Microsoft Graph Permissions** - Grants read access to Azure AD users and groups
 
 ## Prerequisites
 
@@ -100,6 +101,18 @@ Creates a client secret for SecureOS to authenticate to Azure:
 - **Secret Validity**: 2 years
 - **Security**: Secret is only displayed once during setup
 - **Rotation**: Can be rotated anytime via Azure Portal or by re-running the script
+
+### Grants Microsoft Graph API Permissions
+
+Assigns the following Microsoft Graph API permissions for Azure AD data access:
+
+| Permission | Purpose |
+|------------|---------|
+| **User.Read.All** | Read all user profiles, including MFA status and authentication methods |
+| **Directory.Read.All** | Read directory data including organizational structure and applications |
+| **GroupMember.Read.All** | Read group memberships and group properties |
+
+**Note**: These permissions require admin consent in your tenant.
 
 ## Usage
 
