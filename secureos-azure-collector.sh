@@ -33,6 +33,7 @@ Description:
   The script will:
   - Create an Azure AD App Registration and Service Principal named: ${APP_REG_NAME}
   - Generate a client secret (valid for ${SECRET_VALIDITY_YEARS} years)
+  - Register required resource providers (Microsoft.Insights)
   - Assign read-only roles (Reader, Security Reader, Log Analytics Reader)
   - Grant Microsoft Graph API permissions (User.Read.All, Directory.Read.All, GroupMember.Read.All, AuditLog.Read.All)
   - Display the credentials needed for SecureOS to access your Azure subscription
@@ -129,6 +130,24 @@ for ROLE in "Reader" "Security Reader" "Log Analytics Reader"; do
 done
 
 echo ">> Role assignments completed."
+
+# ========= Register Required Resource Providers (idempotent) =========
+echo ">> Checking required resource providers..."
+
+# Register Microsoft.Insights provider (required for Log Analytics and monitoring)
+INSIGHTS_STATE=$(az provider show --namespace Microsoft.Insights --query "registrationState" -o tsv 2>/dev/null || echo "NotRegistered")
+
+if [[ "${INSIGHTS_STATE}" == "Registered" ]]; then
+  echo "   - Microsoft.Insights already registered"
+elif [[ "${INSIGHTS_STATE}" == "Registering" ]]; then
+  echo "   - Microsoft.Insights registration in progress..."
+else
+  echo "   - Registering Microsoft.Insights provider..."
+  az provider register --namespace Microsoft.Insights --output none 2>/dev/null || true
+  echo "   - Microsoft.Insights registration initiated (may take a few minutes)"
+fi
+
+echo ">> Resource providers configured."
 
 # ========= Assign Microsoft Graph API Permissions (idempotent) =========
 echo ">> Configuring Microsoft Graph API permissions for Azure AD access..."
