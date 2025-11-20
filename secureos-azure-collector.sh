@@ -191,19 +191,63 @@ fi
 
 echo "   - Granting admin consent for API permissions..."
 
-# Try to grant admin consent
-if az ad app permission admin-consent --id "${APP_ID}" 2>&1 | grep -q "Forbidden\|Insufficient\|denied"; then
-  echo "   ⚠️  WARNING: Admin consent failed - you may not have sufficient privileges"
+# Get Microsoft Graph Service Principal ID
+MSGRAPH_SP_ID=$(az ad sp show --id "${MSGRAPH_APP_ID}" --query "id" -o tsv)
+
+# Get our app's Service Principal ID
+SP_ID="${SP_OBJECT_ID}"
+
+# Function to grant individual permission
+grant_permission() {
+  local PERM_ID=$1
+  local PERM_NAME=$2
+  
+  # Check if already granted
+  EXISTING_GRANT=$(az rest --method GET \
+    --uri "https://graph.microsoft.com/v1.0/servicePrincipals/${SP_ID}/appRoleAssignments" 2>/dev/null | \
+    jq -r ".value[] | select(.appRoleId==\"${PERM_ID}\") | .id" 2>/dev/null)
+  
+  if [[ -n "${EXISTING_GRANT}" ]]; then
+    echo "      ✅ ${PERM_NAME} already consented"
+    return 0
+  fi
+  
+  # Grant the permission
+  GRANT_RESULT=$(az rest --method POST \
+    --uri "https://graph.microsoft.com/v1.0/servicePrincipals/${SP_ID}/appRoleAssignments" \
+    --headers "Content-Type=application/json" \
+    --body "{
+      \"principalId\": \"${SP_ID}\",
+      \"resourceId\": \"${MSGRAPH_SP_ID}\",
+      \"appRoleId\": \"${PERM_ID}\"
+    }" 2>&1)
+  
+  if echo "${GRANT_RESULT}" | grep -q "error\|Error\|Forbidden\|Insufficient"; then
+    echo "      ⚠️  Failed to consent ${PERM_NAME}"
+    return 1
+  else
+    echo "      ✅ ${PERM_NAME} consented"
+    return 0
+  fi
+}
+
+# Grant consent for each permission
+CONSENT_FAILED=0
+grant_permission "${USER_READ_ALL_ID}" "User.Read.All" || CONSENT_FAILED=1
+grant_permission "${DIRECTORY_READ_ALL_ID}" "Directory.Read.All" || CONSENT_FAILED=1
+grant_permission "${GROUPMEMBER_READ_ALL_ID}" "GroupMember.Read.All" || CONSENT_FAILED=1
+grant_permission "${AUDITLOG_READ_ALL_ID}" "AuditLog.Read.All" || CONSENT_FAILED=1
+
+if [[ ${CONSENT_FAILED} -eq 1 ]]; then
+  echo "   ⚠️  WARNING: Some permissions failed to get admin consent"
   echo "   This requires one of: Global Administrator, Privileged Role Administrator, or Cloud Application Administrator"
   echo ""
-  echo "   MANUAL ACTION REQUIRED:"
-  echo "   1. Go to: https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/CallAnAPI/appId/${APP_ID}"
-  echo "   2. Click 'Grant admin consent for [Your Organization]'"
-  echo "   3. Click 'Yes' to approve"
+  echo "   MANUAL ACTION REQUIRED - Click this link to grant consent:"
+  echo "   https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/CallAnAPI/appId/${APP_ID}"
   echo ""
   CONSENT_NEEDED=true
 else
-  echo "   ✅ Admin consent granted successfully"
+  echo "   ✅ All permissions consented successfully"
   CONSENT_NEEDED=false
 fi
 
@@ -324,7 +368,9 @@ if [[ "${CONSENT_NEEDED:-false}" == "true" ]]; then
   echo "⚠️  ACTION REQUIRED: Admin consent for API permissions is pending!"
   echo ""
   echo "The app will NOT work until admin consent is granted."
-  echo "Grant consent here: https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/CallAnAPI/appId/${APP_ID}"
+  echo ""
+  echo "Click here to grant consent:"
+  echo "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/CallAnAPI/appId/${APP_ID}"
   echo ""
 fi
 
