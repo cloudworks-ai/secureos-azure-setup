@@ -238,18 +238,22 @@ grant_permission "${DIRECTORY_READ_ALL_ID}" "Directory.Read.All" || CONSENT_FAIL
 grant_permission "${GROUPMEMBER_READ_ALL_ID}" "GroupMember.Read.All" || CONSENT_FAILED=1
 grant_permission "${AUDITLOG_READ_ALL_ID}" "AuditLog.Read.All" || CONSENT_FAILED=1
 
+echo ""
 if [[ ${CONSENT_FAILED} -eq 1 ]]; then
   echo "   ⚠️  WARNING: Some permissions failed to get admin consent"
   echo "   This requires one of: Global Administrator, Privileged Role Administrator, or Cloud Application Administrator"
   echo ""
   echo "   MANUAL ACTION REQUIRED - Click this link to grant consent:"
-  echo "   https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/CallAnAPI/appId/${APP_ID}"
-  echo ""
   CONSENT_NEEDED=true
 else
   echo "   ✅ All permissions consented successfully"
+  echo ""
+  echo "   To review or manually grant consent, visit:"
   CONSENT_NEEDED=false
 fi
+
+echo "   https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/CallAnAPI/appId/${APP_ID}"
+echo ""
 
 echo ">> Microsoft Graph API permissions configured."
 
