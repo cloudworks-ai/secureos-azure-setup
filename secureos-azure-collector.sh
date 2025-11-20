@@ -34,7 +34,7 @@ Description:
   - Create an Azure AD App Registration and Service Principal named: ${APP_REG_NAME}
   - Generate a client secret (valid for ${SECRET_VALIDITY_YEARS} years)
   - Assign read-only roles (Reader, Security Reader, Log Analytics Reader)
-  - Grant Microsoft Graph API permissions (User.Read.All, Directory.Read.All, GroupMember.Read.All)
+  - Grant Microsoft Graph API permissions (User.Read.All, Directory.Read.All, GroupMember.Read.All, AuditLog.Read.All)
   - Display the credentials needed for SecureOS to access your Azure subscription
 
 Environment overrides:
@@ -140,6 +140,7 @@ MSGRAPH_APP_ID="00000003-0000-0000-c000-000000000000"
 USER_READ_ALL_ID="df021288-bdef-4463-88db-98f22de89214"           # User.Read.All
 DIRECTORY_READ_ALL_ID="7ab1d382-f21e-4acd-a863-ba3e13f7da61"      # Directory.Read.All
 GROUPMEMBER_READ_ALL_ID="98830695-27a2-44f7-8c18-0c3ebc9698f6"    # GroupMember.Read.All
+AUDITLOG_READ_ALL_ID="b0afded3-3588-46d8-8b3d-9842eff778da"       # AuditLog.Read.All
 
 # Check existing permissions
 EXISTING_PERMS=$(az ad app permission list --id "${APP_ID}" --query "[?resourceAppId=='${MSGRAPH_APP_ID}'].resourceAccess[].id" -o tsv 2>/dev/null || true)
@@ -177,8 +178,34 @@ else
     --api-permissions ${GROUPMEMBER_READ_ALL_ID}=Role 2>/dev/null || true
 fi
 
+# Add AuditLog.Read.All if not present
+if echo "${EXISTING_PERMS}" | grep -q "${AUDITLOG_READ_ALL_ID}"; then
+  echo "   - AuditLog.Read.All already assigned"
+else
+  echo "   - Adding AuditLog.Read.All (Application permission)..."
+  az ad app permission add \
+    --id "${APP_ID}" \
+    --api ${MSGRAPH_APP_ID} \
+    --api-permissions ${AUDITLOG_READ_ALL_ID}=Role 2>/dev/null || true
+fi
+
 echo "   - Granting admin consent for API permissions..."
-az ad app permission admin-consent --id "${APP_ID}" 2>/dev/null || echo "   ⚠️  Admin consent may require additional permissions"
+
+# Try to grant admin consent
+if az ad app permission admin-consent --id "${APP_ID}" 2>&1 | grep -q "Forbidden\|Insufficient\|denied"; then
+  echo "   ⚠️  WARNING: Admin consent failed - you may not have sufficient privileges"
+  echo "   This requires one of: Global Administrator, Privileged Role Administrator, or Cloud Application Administrator"
+  echo ""
+  echo "   MANUAL ACTION REQUIRED:"
+  echo "   1. Go to: https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/CallAnAPI/appId/${APP_ID}"
+  echo "   2. Click 'Grant admin consent for [Your Organization]'"
+  echo "   3. Click 'Yes' to approve"
+  echo ""
+  CONSENT_NEEDED=true
+else
+  echo "   ✅ Admin consent granted successfully"
+  CONSENT_NEEDED=false
+fi
 
 echo ">> Microsoft Graph API permissions configured."
 
@@ -285,11 +312,19 @@ echo "API Permissions:"
 echo "  - User.Read.All (Microsoft Graph)"
 echo "  - Directory.Read.All (Microsoft Graph)"
 echo "  - GroupMember.Read.All (Microsoft Graph)"
+echo "  - AuditLog.Read.All (Microsoft Graph)"
 echo ""
 echo "⚠️  SECURITY NOTES:"
 echo "  - Store the CLIENT_SECRET securely (it won't be displayed again)"
 echo "  - The secret is valid for ${SECRET_VALIDITY_YEARS} years"
 echo "  - You can rotate the secret anytime via Azure Portal"
-echo "  - API permissions may require admin consent in your tenant"
 echo ""
+
+if [[ "${CONSENT_NEEDED:-false}" == "true" ]]; then
+  echo "⚠️  ACTION REQUIRED: Admin consent for API permissions is pending!"
+  echo ""
+  echo "The app will NOT work until admin consent is granted."
+  echo "Grant consent here: https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/CallAnAPI/appId/${APP_ID}"
+  echo ""
+fi
 
